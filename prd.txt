@@ -1,0 +1,435 @@
+📄 PRODUCT REQUIREMENT DOCUMENT
+Project: Kinik Thai Loyalty Point System
+
+Version: 1.0
+Architecture: Supabase + Streamlit
+Deployment: Streamlit Cloud
+Integration: LINE OA (Link Only – No Webhook)
+
+1. Project Objective
+
+Build an internal loyalty system for Kinik Thai Co., Ltd. that:
+
+Awards points based on purchase invoices
+
+Implements FIFO point deduction
+
+Enforces 1-year expiration for both points and coupons
+
+Allows 1,000 points → 50 THB coupon redemption
+
+Uses Supabase as database and business logic layer
+
+Uses Streamlit as frontend (Admin + Customer Portal)
+
+Uses LINE Official Account only as a link to the customer portal
+
+Does NOT use blockchain
+
+Does NOT use n8n
+
+Does NOT require webhook
+
+2. Business Rules
+2.1 Point Earning
+
+10 THB = 1 point
+
+Points earned = floor(invoice_amount / 10)
+
+Points are created per invoice as a separate FIFO lot
+
+2.2 Point Expiration
+
+Points expire 1 year after invoice_date
+
+Expiration applies per lot
+
+Only remaining points expire
+
+Expired points must not affect redeemed points
+
+Expired lots must change status to EXPIRED
+
+2.3 Redemption
+
+1,000 points = 50 THB discount coupon
+
+FIFO deduction required
+
+Deduct from:
+
+earliest expires_at
+
+then earliest earned_at
+
+Coupon expires 1 year after creation
+
+Coupon can only be used once
+
+Coupon status must change to USED after redemption
+
+3. System Architecture
+
+Frontend:
+
+Streamlit application
+
+Admin Portal
+
+Customer Portal
+
+Backend:
+
+Supabase PostgreSQL
+
+SQL RPC functions for:
+
+Create lot
+
+Redeem FIFO
+
+Expire lots
+
+LINE:
+
+Rich Menu button
+
+Link to Streamlit customer page
+
+No webhook
+
+No push notification (Phase 1)
+
+4. Database Schema
+4.1 customers
+
+customer_id (uuid, pk)
+
+name
+
+phone (unique)
+
+line_user_id (nullable, future use)
+
+created_at
+
+4.2 invoices
+
+invoice_no (pk)
+
+customer_id (fk)
+
+amount
+
+invoice_date
+
+created_by
+
+status (APPROVED / VOID)
+
+created_at
+
+4.3 point_lots (FIFO Engine)
+
+lot_id (uuid, pk)
+
+customer_id
+
+invoice_no
+
+points_earned
+
+points_remaining
+
+earned_at
+
+expires_at
+
+status (ACTIVE / DEPLETED / EXPIRED)
+
+Rules:
+
+points_remaining <= points_earned
+
+If remaining = 0 → DEPLETED
+
+If expired → EXPIRED
+
+4.4 coupons
+
+coupon_id (uuid, pk)
+
+customer_id
+
+value_thb (50)
+
+points_used (1000)
+
+code (unique)
+
+status (ACTIVE / USED / EXPIRED)
+
+expires_at
+
+used_at
+
+created_at
+
+4.5 redeems
+
+redeem_id
+
+customer_id
+
+coupon_id
+
+points_used
+
+created_at
+
+4.6 redeem_allocations
+
+alloc_id
+
+redeem_id
+
+lot_id
+
+points_allocated
+
+created_at
+
+Purpose:
+Track which lots were used in each redemption.
+
+5. Required SQL Functions
+
+Claude must implement:
+
+5.1 create_lot_for_invoice(invoice_no)
+
+Fetch invoice
+
+Calculate points
+
+Insert new lot
+
+Set expires_at = invoice_date + 1 year
+
+5.2 redeem_fifo(customer_id)
+
+Call expire_lots()
+
+Check available balance
+
+If balance < 1000 → error
+
+Create coupon
+
+Create redeem record
+
+Deduct points from lots using FIFO
+
+Insert redeem_allocations
+
+Return coupon code
+
+5.3 expire_lots()
+
+Find lots where:
+
+expires_at <= now()
+
+status = ACTIVE
+
+points_remaining > 0
+
+Set:
+
+status = EXPIRED
+
+points_remaining = 0
+
+6. Admin Portal Requirements (Streamlit)
+6.1 Add Invoice
+
+Inputs:
+
+phone
+
+name (if new customer)
+
+invoice_no
+
+amount
+
+invoice_date
+
+created_by
+
+Process:
+
+Upsert customer
+
+Insert invoice
+
+Call create_lot_for_invoice
+
+Show updated balance
+
+Validation:
+
+invoice_no must be unique
+
+amount >= 0
+
+6.2 Redeem
+
+Inputs:
+
+phone
+
+Display:
+
+Current balance
+
+If balance >= 1000:
+
+Call redeem_fifo
+
+Display coupon code
+
+Else:
+
+Show insufficient points
+
+6.3 Use Coupon
+
+Input:
+
+coupon code
+
+Validation:
+
+Must exist
+
+Must be ACTIVE
+
+Must not be expired
+
+Action:
+
+Set status = USED
+
+Set used_at timestamp
+
+6.4 Run Expiry Job
+
+Admin button:
+
+Call expire_lots()
+
+7. Customer Portal Requirements (Streamlit)
+
+Access:
+
+Via LINE link
+
+Input:
+
+Phone number (MVP)
+
+Display:
+
+Points balance
+
+Points needed to redeem
+
+Active coupons
+
+Coupon expiry dates
+
+Redeem button (if eligible)
+
+8. Security Requirements
+
+Invoice duplication must be prevented
+
+No negative point balances
+
+All redemption must be handled by SQL function
+
+No client-side balance manipulation
+
+Coupon codes must be unique
+
+All FIFO logic must execute in database transaction
+
+9. Reporting (Future Ready)
+
+System must support calculation of:
+
+Total points issued
+
+Total points redeemed
+
+Total expired points
+
+Total outstanding points liability
+
+Active coupons count
+
+10. Out of Scope
+
+Blockchain
+
+Tradable tokens
+
+Membership tiers
+
+Distributor commission
+
+LINE webhook automation
+
+ERP integration (manual invoice entry only)
+
+11. Deliverables Required from Claude
+
+Claude must generate:
+
+Complete Supabase SQL schema
+
+All RPC functions
+
+Full Streamlit app.py
+
+.env structure
+
+Deployment guide for Streamlit Cloud
+
+README.md
+
+12. Deployment Environment
+
+Supabase hosted
+
+Streamlit Cloud
+
+Environment variables required:
+
+SUPABASE_URL
+
+SUPABASE_SERVICE_ROLE_KEY
+
+13. UI Style Requirements
+
+Industrial
+
+Minimal
+
+Clean layout
+
+No flashy UI
+
+Functional over decorative
